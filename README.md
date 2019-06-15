@@ -5,3 +5,6 @@
 > 向Data.Servers.servers添加服务器列表,需要存在标签Lobby
 >
 > 创建MCServer对象，开启服务
+
+# Commands
+> 使用/server tp [Key]切换服务器
