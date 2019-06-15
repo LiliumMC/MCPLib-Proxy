@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MCPlib.Protocol.PacketLib;
 using MCPlib.Protocol.Client;
+using MCPlib.Protocol.Client.Packet;
 
 namespace MCPlib.Protocol
 {
@@ -231,29 +232,11 @@ namespace MCPlib.Protocol
 
             return true;
         }
-        public bool SendClientSettings(Client.Packet.ClientSettings set)
+        public void SendPacket(OutgoingPacket packet)
         {
-            try
-            {
-                List<byte> fields = new List<byte>();
-                fields.AddRange(getString(set.language));
-                fields.Add(set.viewDistance);
-                fields.AddRange(protocolversion >= MCVersion.MC19Version
-                    ? getVarInt(set.chatMode)
-                    : new byte[] { set.chatMode });
-                fields.Add(set.chatColors ? (byte)1 : (byte)0);
-                if (protocolversion < MCVersion.MC18Version)
-                {
-                    fields.Add(set.difficulty);
-                    fields.Add((byte)(set.skinParts & 0x1)); //show cape
-                }
-                else fields.Add(set.skinParts);
-                if (protocolversion >= MCVersion.MC19Version)
-                    fields.AddRange(getVarInt(set.mainHand));
-                SendPacket(PacketOutgoingType.ClientSettings, fields);
-            }
-            catch (SocketException) { }
-            return false;
+            List<byte> buffer = new List<byte>();
+            PacketOutgoingType type = packet.GetBuffer(protocolversion, buffer);
+            SendPacket(type, buffer);
         }
         private void SendPacket(PacketOutgoingType packet, IEnumerable<byte> packetData)
         {

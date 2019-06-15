@@ -18,6 +18,10 @@ namespace MCPlib.Protocol
             this.Client = client;
             this._Server = server;
             Lobby = Data.Servers.servers[ServerData.LobbyServer];
+            Dimensions = new Dictionary<int, string>();
+            Dimensions.Add(1, "default");
+            Dimensions.Add(-1, "default");
+            Dimensions.Add(0, "default");
         }
         private Socket Client;
         private ProtocolConnection Proxy;
@@ -25,7 +29,8 @@ namespace MCPlib.Protocol
         private Data.Servers.Server Lobby;
         private MCVersion protocol;
 
-        private Client.Packet.ClientSettings clientSettings { get; set; }
+        private ClientSettings clientSettings { get; set; }
+        private Dictionary<int, string> Dimensions { get; set; }
         private bool login_phase = true;
         private bool trans_server = false;
         private int compression_treshold=0;
@@ -81,7 +86,7 @@ namespace MCPlib.Protocol
                 }
             }
         }
-        private void CreateProxyBridge(Data.Servers.Server server, string name, bool startThread = true)
+        private void CreateProxyBridge(Data.Servers.Server server, string name)
         {
             if (this.Client.Connected)
             {
@@ -94,7 +99,7 @@ namespace MCPlib.Protocol
                         Proxy = new ProtocolConnection(remote, server.Protocol, this);
                         if (Proxy.Login(name))
                         {
-                            if (startThread)
+                            if (cRead==null || !cRead.IsAlive)
                                 handlePacket();
                         }                
                     }
@@ -153,22 +158,10 @@ namespace MCPlib.Protocol
                                 }
                                 packetData = new List<byte>(getString(chatmsg));
                                 break;
-                            case PacketOutgoingType.ClientSettings:
-                                string language = readNextString(packetData);
-                                byte viewDistance = readNextByte(packetData);
-                                int chatMode = (protocol.protocolVersion >= MCVersion.MC19Version) ? readNextVarInt(packetData) : readNextByte(packetData);
-                                bool chatColors = readNextByte(packetData) == 1 ? true : false;
-                                byte difficult = 0;
-                                if (protocol.protocolVersion < MCVersion.MC18Version)
-                                    difficult = readNextByte(packetData);
-                                byte skinParts = readNextByte(packetData);
-                                byte mainHand = 0;
-                                if (protocol.protocolVersion >= MCVersion.MC19Version)
-                                {
-                                    mainHand = (byte)readNextVarInt(packetData);
-                                }
-                                clientSettings = new ClientSettings(language, viewDistance, difficult, (byte)chatMode, chatColors, skinParts, mainHand);
-                                Proxy.SendClientSettings(clientSettings);
+                            case PacketOutgoingType.ClientSettings:                       
+                                clientSettings = new ClientSettings();
+                                clientSettings.ReadBuffer(packetData, protocol.protocolVersion);
+                                Proxy.SendPacket(clientSettings);
                                 continue;
                         }
                         //Console.Write(packetID+" ");
@@ -364,6 +357,12 @@ namespace MCPlib.Protocol
         {
             SendPacket(protocol.getPacketIncomingID(type), packetData);
         }
+        private void SendPacket(IncomingPacket packet)
+        {
+            List<byte> buffer = new List<byte>();
+            PacketIncomingType type = packet.GetBuffer(protocol.protocolVersion, buffer);
+            SendPacket(type, buffer);
+        }
         private void SendPacket(int packetID, IEnumerable<byte> packetData)
         {
             byte[] the_packet = concatBytes(getVarInt(packetID), packetData.ToArray());
@@ -382,13 +381,15 @@ namespace MCPlib.Protocol
         {
             if (args.Count >= 2)
             {
-                if (Data.Servers.servers.ContainsKey(args[1]))
+                string name = args[1];
+                if (Data.Servers.servers.ContainsKey(name))
                 {
-                    Data.Servers.Server s= Data.Servers.servers[args[1]];
+                    Data.Servers.Server s= Data.Servers.servers[name];
                     trans_server = true;
                     getProtocol(s.Protocol);
                     Proxy.Dispose();
-                    CreateProxyBridge(s,Proxy.Username,false);
+                    SendMessage(string.Format(ServerData.MsgServerTransform, name));
+                    CreateProxyBridge(s,Proxy.Username);
                 }
                 else
                     SendMessage(ServerData.MsgServerNotFound);
@@ -416,9 +417,34 @@ namespace MCPlib.Protocol
             switch (type)
             {
                 case PacketIncomingType.JoinGame:
+                    
+                    List<byte> tmp = new List<byte>();
+                    tmp.AddRange(packetData);
+                    int EntityID = readNextInt(tmp);
+                    byte GameMode = readNextByte(tmp);
+                    int Dimension = 0;
+                    byte Difficulty = 0;
+                    if (protocol.protocolVersion >= MCVersion.MC191Version)
+                        Dimension = readNextInt(tmp);
+                    else
+                        Dimension = readNextByte(tmp);
+                    if (protocol.protocolVersion < MCVersion.MC114Version)
+                        Difficulty = readNextByte(tmp);
+                    readNextByte(tmp);
+                    string LevelType = readNextString(tmp);
+                    if (Dimensions.ContainsKey(Dimension))
+                        Dimensions[Dimension] = LevelType;
+                    else
+                        Dimensions.Add(Dimension, LevelType);
                     if (trans_server)
                     {
-                        Proxy.SendClientSettings(clientSettings);
+                        SendPacket(packetID, packetData);
+                        Proxy.SendPacket(clientSettings);
+                        foreach(int d in Dimensions.Keys)
+                        {
+                            Respawn respawnPacket = new Respawn(d, Difficulty, GameMode, Dimensions[d]);
+                            SendPacket(respawnPacket);
+                        }                  
                         trans_server = false;
                         return;
                     }

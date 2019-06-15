@@ -39,6 +39,8 @@ namespace MCPlib.Protocol.PacketLib
                 case PacketIncomingType.KeepAlive: return 0x00;
                 case PacketIncomingType.JoinGame: return 0x01;
                 case PacketIncomingType.ChatMessage: return 0x02;
+                case PacketIncomingType.Respawn:return 0x07;
+                case PacketIncomingType.Entity:return 0x14;
                 case PacketIncomingType.PluginMessage: return 0x3F;
                 case PacketIncomingType.KickPacket: return 0x40;
                 default: return 0xFF;

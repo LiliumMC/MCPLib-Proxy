@@ -16,6 +16,7 @@ namespace MCPlib.Protocol.Client
         SpawnPosition,
         UpdateHealth,
         Respawn,
+        Entity,
         PlayerPositionAndLook,
         HeldItemChange,
         UseBed,

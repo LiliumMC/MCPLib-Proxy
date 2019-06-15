@@ -37,6 +37,7 @@ namespace MCPlib.Protocol
         public const int MC113pre4Version = 386;
         public const int MC113pre7Version = 389;
         public const int MC113Version = 393;
-
+        public const int MC114Version = 477;
+        public const int MC1142Version = 485;
     }
 }

@@ -15,6 +15,7 @@ namespace MCPlib
         public static char vColorChar = '§';
 
         public static string MsgServerNotFound = "§c找不到这个服务器";
+        public static string MsgServerTransform = "§2正在为你转到{0}";
 
         public static string getColorTag(char colorcode)
         {
