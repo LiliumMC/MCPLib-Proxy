@@ -33,6 +33,10 @@
     <StartupObject />
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="BouncyCastle.Crypto, Version=1.8.5.0, Culture=neutral, PublicKeyToken=0e99375e54769942">
+      <HintPath>..\packages\BouncyCastle.1.8.5\lib\BouncyCastle.Crypto.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -44,6 +48,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Command.cs" />
+    <Compile Include="Crypto\CryptoHandler.cs" />
+    <Compile Include="Crypto\Streams\AesStream.cs" />
     <Compile Include="Debug.cs" />
     <Compile Include="MCServer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -74,9 +80,10 @@
     <Compile Include="Protocol\ZlibUtils.cs" />
     <Compile Include="ServerData.cs" />
     <Compile Include="Data\Servers.cs" />
+    <Compile Include="Session\SessionToken.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Commands\" />
+    <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

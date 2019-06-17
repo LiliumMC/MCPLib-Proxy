@@ -8,12 +8,14 @@ using System.Threading.Tasks;
 using MCPlib.Protocol.PacketLib;
 using MCPlib.Protocol.Client;
 using MCPlib.Protocol.Client.Packet;
+using MCPlib.Crypto;
+using MCPlib.Crypto.Streams;
 
 namespace MCPlib.Protocol
 {
     class ProtocolHandler:IMinecraftCo
     {
-        public ProtocolHandler(Socket client,MCServer server)
+        public ProtocolHandler(TcpClient client,MCServer server)
         {
             this.Client = client;
             this._Server = server;
@@ -23,18 +25,21 @@ namespace MCPlib.Protocol
             Dimensions.Add(-1, "default");
             Dimensions.Add(0, "default");
         }
-        private Socket Client;
+        private TcpClient Client;
+        private AesStream EncStream;
         private ProtocolConnection Proxy;
         private MCServer _Server;
         private Data.Servers.Server Lobby;
         private MCVersion protocol;
 
+        private string Username { get; set; }
+        private Session.SessionToken Usertoken { get; set; }
         private ClientSettings clientSettings { get; set; }
         private Dictionary<int, string> Dimensions { get; set; }
         private bool login_phase = true;
         private bool trans_server = false;
         private int compression_treshold=0;
-
+        private bool encrypted = false;
 
 
         private Thread cRead;
@@ -44,7 +49,10 @@ namespace MCPlib.Protocol
             int read = 0;
             while (read < offset)
             {
-                read += Client.Receive(buffer, start + read, offset - read, f);
+                if(encrypted)
+                    read += EncStream.Read(buffer, start + read, offset - read);
+                else
+                    read += Client.Client.Receive(buffer, start + read, offset - read, f);
             }
         }
         private void DoShakeHands(object state)
@@ -63,20 +71,23 @@ namespace MCPlib.Protocol
                         ushort port = readNextUShort(packetData);
                         Debug.Log(string.Format("Connected with {0}:{1}", host, port));
                         byte next_state = packetData[packetData.Count - 1];
-                        if (next_state == 0x01)//PING
+                        if (next_state == 0x01)//Status
                         {
                             byte[] the_state = readDataRAW(readNextVarIntRAW());
                             responsePing();
                         }
-                        else if (next_state == 0x02)//Player
+                        else if (next_state == 0x02)//Login
                         {
                             getProtocol(protocol_ver);
                             List<byte> player_data = new List<byte>(readDataRAW(readNextVarIntRAW()));
                             int tmp_id = readNextVarInt(player_data);
                             string username = readNextString(player_data);
-
-                            Debug.Log("Player " + username + " Join the game.", "Server");
-                            CreateProxyBridge(Lobby, username);
+                            this.Username = username;
+                            if (!ServerData.OnlineMode || StartEncrypt())
+                            {
+                                Debug.Log("Player " + username + " Join the game.", "Server");
+                                CreateProxyBridge(Lobby);
+                            }
                         }
                     }
                 }
@@ -86,28 +97,69 @@ namespace MCPlib.Protocol
                 }
             }
         }
-        private void CreateProxyBridge(Data.Servers.Server server, string name)
+        private bool StartEncrypt()
+        {
+            CryptoHandler crypto = new CryptoHandler();
+
+            List<byte> encryptionRequest = new List<byte>();
+            string serverID = "";
+            encryptionRequest.AddRange(getString(serverID));
+            encryptionRequest.AddRange(getArray(crypto.getPublic()));
+            byte[] token = new byte[4];
+            var rng = new System.Security.Cryptography.RNGCryptoServiceProvider();rng.GetBytes(token);
+            encryptionRequest.AddRange(getArray(token));
+            SendPacket(0x01, encryptionRequest);
+
+            List<byte> encryptResponse = new List<byte>(readDataRAW(readNextVarIntRAW()));
+            if (readNextVarInt(encryptResponse) == 0x01)
+            {
+                List<byte> dec = new List<byte>();
+                dec.AddRange(crypto.Decrypt(readNextByteArray(encryptResponse)));
+                dec.RemoveRange(0, dec.Count - 16);
+                byte[] key_dec = dec.ToArray();
+                byte[] token_dec = token;
+                Usertoken = new Session.SessionToken(key_dec, token_dec);
+                
+                EncStream = CryptoHandler.getAesStream(Client.GetStream(), Usertoken.SecretKey);
+                this.encrypted = true;
+                return true;
+            }
+            return false;
+        }
+        private async void CreateProxyBridge(Data.Servers.Server server)
         {
             if (this.Client.Connected)
             {
-                TcpClient remote = new TcpClient();
-                try
+                await Task.Run(() =>
                 {
-                    remote.Connect(server.Host,server.Port);
-                    if (remote.Connected)
+                    TcpClient remote = new TcpClient();
+                    try
                     {
-                        Proxy = new ProtocolConnection(remote, server.Protocol, this);
-                        if (Proxy.Login(name))
+                        remote.Connect(server.Host, server.Port);
+                        if (remote.Connected)
                         {
-                            if (cRead==null || !cRead.IsAlive)
-                                handlePacket();
-                        }                
+                            ProtocolConnection tmp = new ProtocolConnection(remote, server.Protocol, this);
+                            if (tmp.Login())
+                            {
+                                if (Proxy != null)
+                                    Proxy.Dispose();
+                                Proxy = tmp;
+                                if (cRead == null || !cRead.IsAlive)
+                                    handlePacket();
+                            }
+                            else
+                                tmp.Dispose();
+                        }
                     }
-                }catch(Exception e)
-                {
-                    Debug.Log(e.Message, "Exception");
-                    this.Close();
-                }
+                    catch (Exception e)
+                    {
+                        Debug.Log(e.Message, "Exception");
+                        if (trans_server)
+                            SendMessage(string.Format(ServerData.MsgConnectFailed, e.Message));
+                        else
+                            this.Close();
+                    }
+                });
             }
         }
         private void handlePacket()
@@ -150,7 +202,7 @@ namespace MCPlib.Protocol
                         {
                             case PacketOutgoingType.ChatMessage:
                                 string chatmsg = readNextString(packetData);
-                                Debug.Log("Chat:" + chatmsg, Proxy.Username);
+                                Debug.Log("Chat:" + chatmsg, Username);
                                 if (chatmsg.StartsWith("/"))
                                 {
                                     if (OnCommand(chatmsg))
@@ -199,56 +251,63 @@ namespace MCPlib.Protocol
                 {
                     ProtocolConnection.doPing(Lobby.Host, Lobby.Port, ref packet_ping);
                 }
-                Client.Send(concatBytes(getVarInt(packet_ping.Length), packet_ping));
+                Client.Client.Send(concatBytes(getVarInt(packet_ping.Length), packet_ping));
                 byte[] response = readDataRAW(readNextVarIntRAW());
-                Client.Send(concatBytes(getVarInt(response.Length), response));
+                Client.Client.Send(concatBytes(getVarInt(response.Length), response));
             }
-            catch
+            finally
             {
                 Close();
             }
         }
 
-        public static void Handler(Socket client, MCServer server)
+        public static void Handler(TcpClient client, MCServer server)
         {
             ProtocolHandler connection = new ProtocolHandler(client, server);
             ThreadPool.QueueUserWorkItem(new WaitCallback(connection.DoShakeHands));
         }
-        private int readNextVarIntRAW()
+        public int readNextVarIntRAW()
         {
-            int n = 0;
-            int r = 0;
+            int i = 0;
+            int j = 0;
+            int k = 0;
             byte[] tmp = new byte[1];
-            do
+            while (true)
             {
                 Receive(tmp, 0, 1, SocketFlags.None);
-                r |= ((tmp[0] & 0x7F) << (7 * n));
-                n++;
-                if (n > 5)
-                    throw new OverflowException("VarInt is too big");
-            } while ((r & 128) != 0);
-            return r;
+                k = tmp[0];
+                i |= (k & 0x7F) << j++ * 7;
+                if (j > 5) throw new OverflowException("VarInt too big");
+                if ((k & 0x80) != 128) break;
+            }
+            return i;
         }
         private static int readNextVarInt(List<byte> cache)
         {
-            int n = 0;
-            int r = 0;
+            int i = 0;
+            int j = 0;
             int k = 0;
-            do
+            while (true)
             {
                 k = readNextByte(cache);
-                r |= ((k & 0x7F) << (7 * n));
-                n++;
-                if (n > 5)
-                    throw new OverflowException("VarInt is too big");
-            } while ((r & 128) != 0);
-            return r;
+                i |= (k & 0x7F) << j++ * 7;
+                if (j > 5) throw new OverflowException("VarInt too big");
+                if ((k & 0x80) != 128) break;
+            }
+            return i;
         }
         private static byte readNextByte(List<byte> cache)
         {
             byte result = cache[0];
             cache.RemoveAt(0);
             return result;
+        }
+        public byte[] readNextByteArray(List<byte> cache)
+        {
+            int len = protocol.protocolVersion >= MCVersion.MC18Version
+                ? readNextVarInt(cache)
+                : readNextShort(cache);
+            return readData(len, cache);
         }
         private static string readNextString(List<byte> cache)
         {
@@ -259,17 +318,13 @@ namespace MCPlib.Protocol
             }
             else return "";
         }
-        private byte[] readDataRAW(int offset)
+        public byte[] readDataRAW(int length)
         {
-            if (offset > 0)
+            if (length > 0)
             {
-                try
-                {
-                    byte[] cache = new byte[offset];
-                    Receive(cache, 0, offset, SocketFlags.None);
-                    return cache;
-                }
-                catch (OutOfMemoryException) { }
+                byte[] cache = new byte[length];
+                Receive(cache, 0, length, SocketFlags.None);
+                return cache;
             }
             return new byte[] { };
         }
@@ -321,6 +376,16 @@ namespace MCPlib.Protocol
             byte[] bytes = Encoding.UTF8.GetBytes(text);
 
             return concatBytes(getVarInt(bytes.Length), bytes);
+        }
+        public byte[] getArray(byte[] array)
+        {
+            if (protocol.protocolVersion < MCVersion.MC18Version)
+            {
+                byte[] length = BitConverter.GetBytes((short)array.Length);
+                Array.Reverse(length);
+                return concatBytes(length, array);
+            }
+            else return concatBytes(getVarInt(array.Length), array);
         }
         private void SendMessage(string message)
         {
@@ -375,7 +440,10 @@ namespace MCPlib.Protocol
         }
         private void SendRAW(byte[] buffer)
         {
-            Client.Send(buffer);
+            if (encrypted)
+                EncStream.Write(buffer, 0, buffer.Length);
+            else
+                Client.Client.Send(buffer);
         }
         private void ServerTransfer(List<string> args)
         {
@@ -386,10 +454,9 @@ namespace MCPlib.Protocol
                 {
                     Data.Servers.Server s= Data.Servers.servers[name];
                     trans_server = true;
-                    getProtocol(s.Protocol);
-                    Proxy.Dispose();
+                    //getProtocol(s.Protocol);
                     SendMessage(string.Format(ServerData.MsgServerTransform, name));
-                    CreateProxyBridge(s,Proxy.Username);
+                    CreateProxyBridge(s);
                 }
                 else
                     SendMessage(ServerData.MsgServerNotFound);
@@ -397,14 +464,14 @@ namespace MCPlib.Protocol
         }
         private void Close()
         {
-            Debug.Log("Closed the Client","Connection");
+            //Debug.Log("Closed the Client","Connection");
             if (cRead != null)
             {
                 cRead.Abort();
             }
             if (this.Client != null)
             {
-                this.Client.Close(5);
+                this.Client.Close();
             }
             if (this.Proxy != null)
             {
@@ -440,11 +507,11 @@ namespace MCPlib.Protocol
                     {
                         SendPacket(packetID, packetData);
                         Proxy.SendPacket(clientSettings);
-                        foreach(int d in Dimensions.Keys)
+                        foreach (int d in Dimensions.Keys)
                         {
                             Respawn respawnPacket = new Respawn(d, Difficulty, GameMode, Dimensions[d]);
                             SendPacket(respawnPacket);
-                        }                  
+                        }
                         trans_server = false;
                         return;
                     }
@@ -488,12 +555,12 @@ namespace MCPlib.Protocol
                     break;
                 case Conn.DisconnectReason.LoginRejected:
                     if(!login_phase)
-                        SendPacket(PacketIncomingType.KickPacket, getString(message));
+                        SendPacket(PacketIncomingType.ChatMessage, getString(message));
                     else
-                        SendPacket(0x01, getString(message));
+                        SendPacket(0x00, getString(message));
                     break;
             }
-            Debug.Log("Connection Lost: " + message);
+            Debug.Log("Connection Lost: " + message,Username);
             this.Close();
         }
         public void OnLogin(List<byte> login_packet)
@@ -526,6 +593,14 @@ namespace MCPlib.Protocol
         public MCVersion getProtocol()
         {
             return protocol;
+        }
+        public string getUsername()
+        {
+            return Username;
+        }
+        public Session.SessionToken getUsertoken()
+        {
+            return Usertoken;
         }
     }
 }

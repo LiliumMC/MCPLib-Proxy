@@ -45,7 +45,7 @@ namespace MCPlib
             TcpListener listener = async.AsyncState as TcpListener;
             try
             {
-                Socket client = listener.EndAcceptSocket(async);
+                TcpClient client = listener.EndAcceptTcpClient(async);
                 Protocol.ProtocolHandler.Handler(client, this);
                 if (this._IsStarted)
                 {

@@ -14,5 +14,7 @@ namespace MCPlib.Protocol
         void OnConnectionLost(Conn.DisconnectReason reason, string message);
         void OnLogin(List<byte> login_packet);
         MCVersion getProtocol();
+        string getUsername();
+        Session.SessionToken getUsertoken();
     }
 }

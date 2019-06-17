@@ -11,11 +11,14 @@ namespace MCPlib
         public static string ServerName = "Lilium Test";
         public static string LobbyServer = "Lobby";
         public static bool CustomMOTD = false;
+        public static bool OnlineMode = true;
 
         public static char vColorChar = '§';
 
         public static string MsgServerNotFound = "§c找不到这个服务器";
         public static string MsgServerTransform = "§2正在为你转到{0}";
+        public static string MsgConnectFailed = "出现了错误:§c{0}";
+        public static string MsgEncryptReject = "无法验证身份，请开启OnlineMode";
 
         public static string getColorTag(char colorcode)
         {

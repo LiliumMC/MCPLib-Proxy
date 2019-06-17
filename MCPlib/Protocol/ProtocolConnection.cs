@@ -9,6 +9,8 @@ using System.Threading.Tasks;
 using MCPlib.Protocol.PacketLib;
 using MCPlib.Protocol.Client;
 using MCPlib.Protocol.Client.Packet;
+using MCPlib.Crypto.Streams;
+using MCPlib.Crypto;
 
 namespace MCPlib.Protocol
 {
@@ -25,30 +27,33 @@ namespace MCPlib.Protocol
         private int protocolversion;
         private int compression_treshold = 0;
         private bool login_phase = true;
+        private bool encrypted = false;
         TcpClient c;
         Thread netRead;
+        AesStream s;
 
         private IMinecraftCo handler;
-        public string Username;
 
         private void Receive(byte[] buffer, int start, int offset, SocketFlags f)
         {
             int read = 0;
             while (read < offset)
             {
-                read += c.Client.Receive(buffer, start + read, offset - read, f);
+                if(encrypted)
+                    read += s.Read(buffer, start + read, offset - read);
+                else
+                    read += c.Client.Receive(buffer, start + read, offset - read, f);
             }
         }
-        public bool Login(string Username)
+        public bool Login()
         {
-            this.Username = Username;
             byte[] protocol_version = getVarInt(protocolversion);
             string server_address = handler.getServerHost();
             byte[] server_port = BitConverter.GetBytes(handler.getServerPort()); Array.Reverse(server_port);
             byte[] next_state = getVarInt(2);
             byte[] handshake_packet = concatBytes(protocol_version, getString(server_address), server_port, next_state);
             SendPacket(0x00, handshake_packet);
-            byte[] login_packet = getString(Username);
+            byte[] login_packet = getString(handler.getUsername());
             SendPacket(0x00, login_packet);
 
             int packetID = -1;
@@ -63,7 +68,10 @@ namespace MCPlib.Protocol
                 }
                 else if (packetID == 0x01)//Encrypt
                 {
-                    return false;
+                    string serverID = readNextString(packetData);
+                    byte[] Serverkey = readNextByteArray(packetData);
+                    byte[] token = readNextByteArray(packetData);
+                    return SwitchToEncrypted(serverID, Serverkey, token);
                 }
                 else if (packetID == 0x02)//Logined
                 {
@@ -130,11 +138,27 @@ namespace MCPlib.Protocol
 
             return concatBytes(getVarInt(bytes.Length), bytes);
         }
+        public byte[] getArray(byte[] array)
+        {
+            if (protocolversion < MCVersion.MC18Version)
+            {
+                byte[] length = BitConverter.GetBytes((short)array.Length);
+                Array.Reverse(length);
+                return concatBytes(length, array);
+            }
+            else return concatBytes(getVarInt(array.Length), array);
+        }
         private static byte readNextByte(List<byte> cache)
         {
             byte result = cache[0];
             cache.RemoveAt(0);
             return result;
+        }
+        private short readNextShort(List<byte> cache)
+        {
+            byte[] rawValue = readData(2, cache);
+            Array.Reverse(rawValue); //Endianness
+            return BitConverter.ToInt16(rawValue, 0);
         }
         private static byte[] readData(int offset, List<byte> cache)
         {
@@ -181,17 +205,20 @@ namespace MCPlib.Protocol
             }
             return i;
         }
-        private byte[] readDataRAW(int offset)
+        private byte[] readNextByteArray(List<byte> cache)
         {
-            if (offset > 0)
+            int len = protocolversion >= MCVersion.MC18Version
+                ? readNextVarInt(cache)
+                : readNextShort(cache);
+            return readData(len, cache);
+        }
+        public byte[] readDataRAW(int length)
+        {
+            if (length > 0)
             {
-                try
-                {
-                    byte[] cache = new byte[offset];
-                    Receive(cache, 0, offset, SocketFlags.None);
-                    return cache;
-                }
-                catch (OutOfMemoryException) { }
+                byte[] cache = new byte[length];
+                Receive(cache, 0, length, SocketFlags.None);
+                return cache;
             }
             return new byte[] { };
         }
@@ -263,7 +290,61 @@ namespace MCPlib.Protocol
         }
         public void SendRAW(byte[] buffer)
         {
-            c.Client.Send(buffer);
+            if(encrypted)
+                s.Write(buffer, 0, buffer.Length);
+            else
+                c.Client.Send(buffer);
+        }
+        public bool SwitchToEncrypted(string serverID, byte[] Serverkey, byte[] token)
+        {
+            if (ServerData.OnlineMode)
+            {
+                var usertoken = handler.getUsertoken();
+                if (usertoken == null)
+                    return false;
+                var crypto = CryptoHandler.DecodeRSAPublicKey(Serverkey);
+                byte[] secretKey = CryptoHandler.GenerateAESPrivateKey();
+                byte[] key_enc = crypto.Encrypt(secretKey, false);
+                byte[] token_enc = crypto.Encrypt(token, false);
+                Console.WriteLine(key_enc.Length + " " + token_enc.Length);
+
+                SendPacket(0x01, concatBytes(getArray(key_enc), getArray(token_enc)));
+                
+                this.s = CryptoHandler.getAesStream(c.GetStream(), usertoken.SecretKey);
+                encrypted = true;
+
+                int packetID = -1;
+                List<byte> packetData = new List<byte>();
+                while (true)
+                {
+                    readNextPacket(ref packetID, packetData);
+                    if (packetID == 0x00)
+                    {
+                        handler.OnConnectionLost(Conn.DisconnectReason.LoginRejected, readNextString(packetData));
+                        return false;
+                    }
+                    else if (packetID == 0x02)//Logined
+                    {
+                        Debug.Log("Login Success");
+                        login_phase = false;
+                        handler.OnLogin(packetData);
+                        StartUpdating();
+                        return true;
+                    }
+                    else
+                    {
+                        if (packetID == 0x03 && login_phase)
+                        {
+                            if (protocolversion >= MCVersion.MC18Version)
+                                compression_treshold = readNextVarInt(packetData);
+                        }
+                        handler.receivePacket(packetID, packetData);
+                    }
+                }
+            }
+            else
+                handler.OnConnectionLost(Conn.DisconnectReason.LoginRejected, ServerData.MsgEncryptReject);
+            return false;
         }
         public static void doPing(string host,ushort port,ref byte[] data)
         {
