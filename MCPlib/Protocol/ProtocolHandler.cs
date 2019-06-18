@@ -13,7 +13,7 @@ using MCPlib.Crypto.Streams;
 
 namespace MCPlib.Protocol
 {
-    class ProtocolHandler:IMinecraftCo
+    class ProtocolHandler:DataType, IMinecraftCo
     {
         public ProtocolHandler(TcpClient client,MCServer server)
         {
@@ -33,7 +33,6 @@ namespace MCPlib.Protocol
         private MCVersion protocol;
 
         private string Username { get; set; }
-        private Session.SessionToken Usertoken { get; set; }
         private ClientSettings clientSettings { get; set; }
         private Dictionary<int, string> Dimensions { get; set; }
         private bool login_phase = true;
@@ -103,6 +102,8 @@ namespace MCPlib.Protocol
 
             List<byte> encryptionRequest = new List<byte>();
             string serverID = "";
+            if (protocol.protocolVersion < MCVersion.MC172Version)
+                serverID = "lilium-pre";
             encryptionRequest.AddRange(getString(serverID));
             encryptionRequest.AddRange(getArray(crypto.getPublic()));
             byte[] token = new byte[4];
@@ -118,9 +119,8 @@ namespace MCPlib.Protocol
                 dec.RemoveRange(0, dec.Count - 16);
                 byte[] key_dec = dec.ToArray();
                 byte[] token_dec = token;
-                Usertoken = new Session.SessionToken(key_dec, token_dec);
                 
-                EncStream = CryptoHandler.getAesStream(Client.GetStream(), Usertoken.SecretKey);
+                EncStream = CryptoHandler.getAesStream(Client.GetStream(), key_dec);
                 this.encrypted = true;
                 return true;
             }
@@ -249,7 +249,8 @@ namespace MCPlib.Protocol
                 }
                 else
                 {
-                    ProtocolConnection.doPing(Lobby.Host, Lobby.Port, ref packet_ping);
+                    var tmp = new ProtocolConnection(new TcpClient());
+                    tmp.doPing(Lobby.Host, Lobby.Port, ref packet_ping);
                 }
                 Client.Client.Send(concatBytes(getVarInt(packet_ping.Length), packet_ping));
                 byte[] response = readDataRAW(readNextVarIntRAW());
@@ -282,41 +283,12 @@ namespace MCPlib.Protocol
             }
             return i;
         }
-        private static int readNextVarInt(List<byte> cache)
-        {
-            int i = 0;
-            int j = 0;
-            int k = 0;
-            while (true)
-            {
-                k = readNextByte(cache);
-                i |= (k & 0x7F) << j++ * 7;
-                if (j > 5) throw new OverflowException("VarInt too big");
-                if ((k & 0x80) != 128) break;
-            }
-            return i;
-        }
-        private static byte readNextByte(List<byte> cache)
-        {
-            byte result = cache[0];
-            cache.RemoveAt(0);
-            return result;
-        }
         public byte[] readNextByteArray(List<byte> cache)
         {
             int len = protocol.protocolVersion >= MCVersion.MC18Version
                 ? readNextVarInt(cache)
                 : readNextShort(cache);
             return readData(len, cache);
-        }
-        private static string readNextString(List<byte> cache)
-        {
-            int length = readNextVarInt(cache);
-            if (length > 0)
-            {
-                return Encoding.UTF8.GetString(readData(length, cache));
-            }
-            else return "";
         }
         public byte[] readDataRAW(int length)
         {
@@ -327,55 +299,6 @@ namespace MCPlib.Protocol
                 return cache;
             }
             return new byte[] { };
-        }
-        private static byte[] readData(int offset, List<byte> cache)
-        {
-            byte[] result = cache.Take(offset).ToArray();
-            cache.RemoveRange(0, offset);
-            return result;
-        }
-        private static short readNextShort(List<byte> cache)
-        {
-            byte[] rawValue = readData(2, cache);
-            Array.Reverse(rawValue); //Endianness
-            return BitConverter.ToInt16(rawValue, 0);
-        }
-        private static int readNextInt(List<byte> cache)
-        {
-            byte[] rawValue = readData(4, cache);
-            Array.Reverse(rawValue); //Endianness
-            return BitConverter.ToInt32(rawValue, 0);
-        }
-        private static ushort readNextUShort(List<byte> cache)
-        {
-            byte[] rawValue = readData(2, cache);
-            Array.Reverse(rawValue); //Endianness
-            return BitConverter.ToUInt16(rawValue, 0);
-        }
-        private static byte[] concatBytes(params byte[][] bytes)
-        {
-            List<byte> result = new List<byte>();
-            foreach (byte[] array in bytes)
-                result.AddRange(array);
-            return result.ToArray();
-        }
-
-        private static byte[] getVarInt(int paramInt)
-        {
-            List<byte> bytes = new List<byte>();
-            while ((paramInt & -128) != 0)
-            {
-                bytes.Add((byte)(paramInt & 127 | 128));
-                paramInt = (int)(((uint)paramInt) >> 7);
-            }
-            bytes.Add((byte)paramInt);
-            return bytes.ToArray();
-        }
-        private static byte[] getString(string text)
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(text);
-
-            return concatBytes(getVarInt(bytes.Length), bytes);
         }
         public byte[] getArray(byte[] array)
         {
@@ -597,10 +520,6 @@ namespace MCPlib.Protocol
         public string getUsername()
         {
             return Username;
-        }
-        public Session.SessionToken getUsertoken()
-        {
-            return Usertoken;
         }
     }
 }

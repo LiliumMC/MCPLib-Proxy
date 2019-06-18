@@ -10,18 +10,17 @@ namespace MCPlib.Protocol
     {
         public int readNextVarInt(List<byte> cache)
         {
-            int n = 0;
-            int r = 0;
+            int i = 0;
+            int j = 0;
             int k = 0;
-            do
+            while (true)
             {
                 k = readNextByte(cache);
-                r |= ((k & 0x7F) << (7 * n));
-                n++;
-                if (n > 5)
-                    throw new OverflowException("VarInt is too big");
-            } while ((r & 128) != 0);
-            return r;
+                i |= (k & 0x7F) << j++ * 7;
+                if (j > 5) throw new OverflowException("VarInt too big");
+                if ((k & 0x80) != 128) break;
+            }
+            return i;
         }
         public byte readNextByte(List<byte> cache)
         {

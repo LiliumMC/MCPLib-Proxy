@@ -80,7 +80,6 @@
     <Compile Include="Protocol\ZlibUtils.cs" />
     <Compile Include="ServerData.cs" />
     <Compile Include="Data\Servers.cs" />
-    <Compile Include="Session\SessionToken.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

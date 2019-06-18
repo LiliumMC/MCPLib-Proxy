@@ -14,7 +14,7 @@ using MCPlib.Crypto;
 
 namespace MCPlib.Protocol
 {
-    class ProtocolConnection
+    class ProtocolConnection:DataType
     {
         public ProtocolConnection(TcpClient Client) : this(Client, 0,null) { }
         public ProtocolConnection(TcpClient Client, int ProtocolVersion,IMinecraftCo Handle)
@@ -114,30 +114,6 @@ namespace MCPlib.Protocol
               });
             netRead.Start();
         }
-        private static byte[] concatBytes(params byte[][] bytes)
-        {
-            List<byte> result = new List<byte>();
-            foreach (byte[] array in bytes)
-                result.AddRange(array);
-            return result.ToArray();
-        }
-        private static byte[] getVarInt(int paramInt)
-        {
-            List<byte> bytes = new List<byte>();
-            while ((paramInt & -128) != 0)
-            {
-                bytes.Add((byte)(paramInt & 127 | 128));
-                paramInt = (int)(((uint)paramInt) >> 7);
-            }
-            bytes.Add((byte)paramInt);
-            return bytes.ToArray();
-        }
-        private static byte[] getString(string text)
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes(text);
-
-            return concatBytes(getVarInt(bytes.Length), bytes);
-        }
         public byte[] getArray(byte[] array)
         {
             if (protocolversion < MCVersion.MC18Version)
@@ -147,33 +123,6 @@ namespace MCPlib.Protocol
                 return concatBytes(length, array);
             }
             else return concatBytes(getVarInt(array.Length), array);
-        }
-        private static byte readNextByte(List<byte> cache)
-        {
-            byte result = cache[0];
-            cache.RemoveAt(0);
-            return result;
-        }
-        private short readNextShort(List<byte> cache)
-        {
-            byte[] rawValue = readData(2, cache);
-            Array.Reverse(rawValue); //Endianness
-            return BitConverter.ToInt16(rawValue, 0);
-        }
-        private static byte[] readData(int offset, List<byte> cache)
-        {
-            byte[] result = cache.Take(offset).ToArray();
-            cache.RemoveRange(0, offset);
-            return result;
-        }
-        private static string readNextString(List<byte> cache)
-        {
-            int length = readNextVarInt(cache);
-            if (length > 0)
-            {
-                return Encoding.UTF8.GetString(readData(length, cache));
-            }
-            else return "";
         }
         public int readNextVarIntRAW()
         {
@@ -185,20 +134,6 @@ namespace MCPlib.Protocol
             {
                 Receive(tmp, 0, 1, SocketFlags.None);
                 k = tmp[0];
-                i |= (k & 0x7F) << j++ * 7;
-                if (j > 5) throw new OverflowException("VarInt too big");
-                if ((k & 0x80) != 128) break;
-            }
-            return i;
-        }
-        private static int readNextVarInt(List<byte> cache)
-        {
-            int i = 0;
-            int j = 0;
-            int k = 0;
-            while (true)
-            {
-                k = readNextByte(cache);
                 i |= (k & 0x7F) << j++ * 7;
                 if (j > 5) throw new OverflowException("VarInt too big");
                 if ((k & 0x80) != 128) break;
@@ -299,18 +234,15 @@ namespace MCPlib.Protocol
         {
             if (ServerData.OnlineMode)
             {
-                var usertoken = handler.getUsertoken();
-                if (usertoken == null)
-                    return false;
                 var crypto = CryptoHandler.DecodeRSAPublicKey(Serverkey);
                 byte[] secretKey = CryptoHandler.GenerateAESPrivateKey();
                 byte[] key_enc = crypto.Encrypt(secretKey, false);
                 byte[] token_enc = crypto.Encrypt(token, false);
-                Console.WriteLine(key_enc.Length + " " + token_enc.Length);
+                //Console.WriteLine(key_enc.Length + " " + token_enc.Length);
 
                 SendPacket(0x01, concatBytes(getArray(key_enc), getArray(token_enc)));
                 
-                this.s = CryptoHandler.getAesStream(c.GetStream(), usertoken.SecretKey);
+                this.s = CryptoHandler.getAesStream(c.GetStream(), secretKey);
                 encrypted = true;
 
                 int packetID = -1;
@@ -346,10 +278,9 @@ namespace MCPlib.Protocol
                 handler.OnConnectionLost(Conn.DisconnectReason.LoginRejected, ServerData.MsgEncryptReject);
             return false;
         }
-        public static void doPing(string host,ushort port,ref byte[] data)
+        public void doPing(string host,ushort port,ref byte[] data)
         {
-            TcpClient tcp = new TcpClient();
-            tcp.Connect(host,port);
+            c.Connect(host,port);
             byte[] packet_id = getVarInt(0);
             byte[] protocol_version = getVarInt(-1);
             byte[] server_port = BitConverter.GetBytes(port); Array.Reverse(server_port);
@@ -357,20 +288,19 @@ namespace MCPlib.Protocol
             byte[] packet = concatBytes(packet_id, protocol_version, getString(host), server_port, next_state);
             byte[] tosend = concatBytes(getVarInt(packet.Length), packet);
 
-            tcp.Client.Send(tosend, SocketFlags.None);
+            c.Client.Send(tosend, SocketFlags.None);
 
             byte[] status_request = getVarInt(0);
             byte[] request_packet = concatBytes(getVarInt(status_request.Length), status_request);
 
-            tcp.Client.Send(request_packet, SocketFlags.None);
+            c.Client.Send(request_packet, SocketFlags.None);
 
-            ProtocolConnection ComTmp = new ProtocolConnection(tcp);
-            int packetLength = ComTmp.readNextVarIntRAW();
+            int packetLength = readNextVarIntRAW();
             if (packetLength > 0)
             {
-                data = ComTmp.readDataRAW(packetLength);
+                data = readDataRAW(packetLength);
             }
-            tcp.Close();
+            c.Close();
         }
         public void Dispose()
         {
