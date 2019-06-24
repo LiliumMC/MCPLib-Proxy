@@ -15,5 +15,6 @@ namespace MCPlib.Protocol
         void OnLogin(List<byte> login_packet);
         MCVersion getProtocol();
         string getUsername();
+        void setCompression(int threshold);
     }
 }

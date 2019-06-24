@@ -175,29 +175,17 @@ namespace MCPlib.Protocol
                         List<byte> packetData = new List<byte>(readDataRAW(data_len));
                         if (compression_treshold > 0)
                         {
-                            int packet_len = readNextVarInt(packetData);
+                            int compressed_length = readNextVarInt(packetData);
 
-                            if (packet_len > 0)//封包已压缩
+                            if (compressed_length > 0)//封包已压缩
                             {
-                                byte[] uncompress = ZlibUtils.Decompress(packetData.ToArray());
+                                byte[] uncompress = ZlibUtils.Decompress(packetData.ToArray(), compressed_length);
                                 packetData = new List<byte>(uncompress);
-                                packetID = readNextVarInt(packetData);
-                            }
-                            else
-                            {
-                                packetID = readNextVarInt(packetData);
                             }
                         }
-                        else
-                        {
-                            packetID = readNextVarInt(packetData);
-                        }
+                        packetID = readNextVarInt(packetData);
                         var type = protocol.getPacketOutgoingType(packetID);
-                        if (packetID == 0x03 && login_phase)
-                        {
-                            if (protocol.protocolVersion >= MCVersion.MC18Version)
-                                compression_treshold = readNextVarInt(packetData);
-                        }
+
                         switch (type)
                         {
                             case PacketOutgoingType.ChatMessage:
@@ -233,6 +221,7 @@ namespace MCPlib.Protocol
             switch (protocol_ver)
             {
                 case 5:protocol =new MC1710(); return;
+                case 340:protocol = new MC1122(); return;
             }
         }
 
@@ -312,34 +301,8 @@ namespace MCPlib.Protocol
         }
         private void SendMessage(string message)
         {
-            if (String.IsNullOrEmpty(message))
-                return;
-            string result = String.Empty;
-            if (message.Contains(ServerData.vColorChar))
-            {
-                string[] data = message.Split(ServerData.vColorChar);
-                List<string> extra = new List<string>();
-                result = "{\"extra\":[";
-                foreach (string t in data)
-                {
-                    if (!string.IsNullOrEmpty(t))
-                    {
-                        string colorTag = ServerData.getColorTag(t[0]);
-                        if (colorTag != "")
-                        {
-                            extra.Add("{" + string.Format("\"color\":\"{0}\",\"text\":\"{1}\"", colorTag, t.Remove(0, 1)) + "}");
-                        }
-                        else
-                            extra.Add("{" + string.Format("\"text\":\"{0}\"", t) + "}");
-                    }
-                }
-                result += string.Join(",", extra) + "],\"text\":\"\"}";
-            }
-            else
-            {
-                result = "{\"text\":\"" + message + "\"}";
-            }
-            SendPacket(PacketIncomingType.ChatMessage, getString(result));
+            ChatMessage msg = new ChatMessage(message);
+            SendPacket(msg);
         }
         private void SendPacket(PacketIncomingType type, IEnumerable<byte> packetData)
         {
@@ -354,10 +317,15 @@ namespace MCPlib.Protocol
         private void SendPacket(int packetID, IEnumerable<byte> packetData)
         {
             byte[] the_packet = concatBytes(getVarInt(packetID), packetData.ToArray());
-            if (protocol.protocolVersion> MCVersion.MC18Version && the_packet.Length > compression_treshold)
+            if (protocol.protocolVersion> MCVersion.MC18Version && compression_treshold > 0)
             {
-                int sizeUncompressed = the_packet.Length;
-                the_packet = concatBytes(getVarInt(sizeUncompressed), ZlibUtils.Compress(the_packet));
+                if(the_packet.Length > compression_treshold)
+                {
+                    int sizeUncompressed = the_packet.Length;
+                    the_packet = concatBytes(getVarInt(sizeUncompressed), ZlibUtils.Compress(the_packet));
+                }
+                else
+                    the_packet = concatBytes(getVarInt(0), the_packet);
             }
             SendRAW(concatBytes(getVarInt(the_packet.Length), the_packet));
         }
@@ -520,6 +488,14 @@ namespace MCPlib.Protocol
         public string getUsername()
         {
             return Username;
+        }
+        public void setCompression(int threshold)
+        {
+            if (login_phase)
+            {
+                SendPacket(0x03, getVarInt(threshold));
+                compression_treshold = threshold;
+            }
         }
     }
 }

@@ -34,6 +34,7 @@ namespace MCPlib.Protocol.Client
         KickPacket,
         NetworkCompressionTreshold,
         ResourcePackSend,
+        Disconnect,
         UnknownPacket
     }
 }

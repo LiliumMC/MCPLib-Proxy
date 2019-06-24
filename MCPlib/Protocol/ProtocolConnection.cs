@@ -86,9 +86,13 @@ namespace MCPlib.Protocol
                     if (packetID == 0x03 && login_phase)
                     {
                         if(protocolversion >= MCVersion.MC18Version)
+                        {
                             compression_treshold = readNextVarInt(packetData);
+                            handler.setCompression(compression_treshold);
+                        }
                     }
-                    handler.receivePacket(packetID, packetData);
+                    else
+                        handler.receivePacket(packetID, packetData);
                 }
             }
         }
