@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace MCPlib.Protocol.Client.Packet
+namespace MCPlib.Protocol.Packet.Client
 {
     class ChatMessage : IncomingPacket
     {

@@ -54,11 +54,11 @@
     <Compile Include="Json.cs" />
     <Compile Include="MCServer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Protocol\Client\Packet\ChatMessage.cs" />
-    <Compile Include="Protocol\Client\Packet\ClientSettings.cs" />
-    <Compile Include="Protocol\Client\Packet\IncomingPacket.cs" />
-    <Compile Include="Protocol\Client\Packet\OutgoingPacket.cs" />
-    <Compile Include="Protocol\Client\Packet\Respawn.cs" />
+    <Compile Include="Protocol\Packet\Client\ChatMessage.cs" />
+    <Compile Include="Protocol\Packet\Server\ClientSettings.cs" />
+    <Compile Include="Protocol\Packet\IncomingPacket.cs" />
+    <Compile Include="Protocol\Packet\OutgoingPacket.cs" />
+    <Compile Include="Protocol\Packet\Client\Respawn.cs" />
     <Compile Include="Protocol\Compression\CRC32.cs" />
     <Compile Include="Protocol\Compression\Deflate.cs" />
     <Compile Include="Protocol\Compression\GZipStream.cs" />
@@ -77,8 +77,8 @@
     <Compile Include="Protocol\PacketLib\MC1122.cs" />
     <Compile Include="Protocol\PacketLib\MC1710.cs" />
     <Compile Include="Protocol\PacketLib\MCVersion.cs" />
-    <Compile Include="Protocol\Client\PacketIncomingType.cs" />
-    <Compile Include="Protocol\Client\PacketOutgoingType.cs" />
+    <Compile Include="Protocol\Handler\PacketIncomingType.cs" />
+    <Compile Include="Protocol\Handler\PacketOutgoingType.cs" />
     <Compile Include="Protocol\ProtocolConnection.cs" />
     <Compile Include="Protocol\ProtocolHandler.cs" />
     <Compile Include="Protocol\ZlibUtils.cs" />

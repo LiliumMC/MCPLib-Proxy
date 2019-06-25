@@ -7,8 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MCPlib.Protocol.PacketLib;
-using MCPlib.Protocol.Client;
-using MCPlib.Protocol.Client.Packet;
+using MCPlib.Protocol.Packet;
 using MCPlib.Crypto.Streams;
 using MCPlib.Crypto;
 
@@ -45,11 +44,11 @@ namespace MCPlib.Protocol
                     read += c.Client.Receive(buffer, start + read, offset - read, f);
             }
         }
-        public bool Login()
+        public bool Login(Data.Servers.Server server)
         {
             byte[] protocol_version = getVarInt(protocolversion);
-            string server_address = handler.getServerHost();
-            byte[] server_port = BitConverter.GetBytes(handler.getServerPort()); Array.Reverse(server_port);
+            string server_address = server.Host;
+            byte[] server_port = BitConverter.GetBytes(server.Port); Array.Reverse(server_port);
             byte[] next_state = getVarInt(2);
             byte[] handshake_packet = concatBytes(protocol_version, getString(server_address), server_port, next_state);
             SendPacket(0x00, handshake_packet);

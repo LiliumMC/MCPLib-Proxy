@@ -6,10 +6,11 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MCPlib.Protocol.PacketLib;
-using MCPlib.Protocol.Client;
-using MCPlib.Protocol.Client.Packet;
 using MCPlib.Crypto;
 using MCPlib.Crypto.Streams;
+using MCPlib.Protocol.Packet;
+using MCPlib.Protocol.Packet.Client;
+using MCPlib.Protocol.Packet.Server;
 
 namespace MCPlib.Protocol
 {
@@ -139,7 +140,7 @@ namespace MCPlib.Protocol
                         if (remote.Connected)
                         {
                             ProtocolConnection tmp = new ProtocolConnection(remote, server.Protocol, this);
-                            if (tmp.Login())
+                            if (tmp.Login(server))
                             {
                                 if (Proxy != null)
                                     Proxy.Dispose();

@@ -11,7 +11,7 @@ namespace MCPlib
         public static string ServerName = "Lilium Test";
         public static string LobbyServer = "Lobby";
         public static bool CustomMOTD = false;
-        public static bool OnlineMode = false;
+        public static bool OnlineMode = true;
 
         public static char vColorChar = '§';
 
